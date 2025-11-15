@@ -1,0 +1,106 @@
+[gd_scene load_steps=2 format=3 uid="uid://bpt0hrlne8fhq"]
+
+[sub_resource type="GDScript" id="GDScript_11gej"]
+script/source = "extends Control
+
+
+func _on_h_split_container_top_dragged(offset: int) -> void:
+	%HSplitContainerBot.split_offset = offset
+	var center_point = %VSplitContainer.size.x * 0.5 - %dragger.size.x * 0.5
+	%dragger.position.x = center_point + offset
+
+func _on_h_split_container_bot_dragged(offset: int) -> void:
+	%HSplitContainerTop.split_offset = offset
+	var center_point = %VSplitContainer.size.x * 0.5 - %dragger.size.x * 0.5
+	%dragger.position.x = center_point + offset
+
+
+func _ready() -> void:
+	%dragger.reparent(%VSplitContainer.get_drag_area_control())
+	%dragger.set_offsets_preset(Control.PRESET_CENTER)
+
+var drag_start : Vector2
+var dragger_start : float
+var offset_h_start : float
+var offset_v_start : float
+func _on_dragger_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.is_pressed():
+		drag_start = event.position
+		dragger_start = %dragger.position.x
+		offset_v_start = %VSplitContainer.split_offset
+		offset_h_start = %HSplitContainerTop.split_offset
+	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		var diff = event.position - drag_start
+		%dragger.position.x = diff.x + dragger_start
+		%VSplitContainer.split_offset = diff.y + offset_v_start
+		%HSplitContainerTop.split_offset = diff.x + offset_h_start
+		%HSplitContainerBot.split_offset = diff.x + offset_h_start
+"
+
+[node name="Control" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = SubResource("GDScript_11gej")
+
+[node name="VSplitContainer" type="VSplitContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="HSplitContainerTop" type="HSplitContainer" parent="VSplitContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ColorRectLeft" type="ColorRect" parent="VSplitContainer/HSplitContainerTop"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ColorRectRight" type="ColorRect" parent="VSplitContainer/HSplitContainerTop"]
+layout_mode = 2
+size_flags_horizontal = 3
+color = Color(0, 0, 0, 1)
+
+[node name="HSplitContainerBot" type="HSplitContainer" parent="VSplitContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ColorRectLeft" type="ColorRect" parent="VSplitContainer/HSplitContainerBot"]
+layout_mode = 2
+size_flags_horizontal = 3
+color = Color(0, 0, 0, 1)
+
+[node name="ColorRectRight" type="ColorRect" parent="VSplitContainer/HSplitContainerBot"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="dragger" type="ColorRect" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(30, 30)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_default_cursor_shape = 13
+color = Color(1, 0, 0, 1)
+
+[connection signal="dragged" from="VSplitContainer/HSplitContainerTop" to="." method="_on_h_split_container_top_dragged"]
+[connection signal="dragged" from="VSplitContainer/HSplitContainerBot" to="." method="_on_h_split_container_bot_dragged"]
+[connection signal="gui_input" from="dragger" to="." method="_on_dragger_gui_input"]

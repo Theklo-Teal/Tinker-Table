@@ -1,0 +1,111 @@
+[gd_scene load_steps=6 format=3 uid="uid://bfficwytw38qp"]
+
+[sub_resource type="GDScript" id="GDScript_h2yge"]
+script/source = "@tool
+extends Control
+
+@export var bits : Array[bool] :
+	set(val):
+		bits = val
+		queue_redraw()
+@export var labels : Array[String] : ## Text for to display with the bits. Use `{n10}` for automatic number, `{p2}` for powers of two and `{n16}` for hex format.
+	set(val):
+		labels = val
+		queue_redraw()
+
+@export var group_size : int = 0 :
+	set(val):
+		group_size = max(val, 0)
+		queue_redraw()
+
+@export var editable : bool = false
+
+@export var text_setts : LabelSettings
+@export var panel_hi : StyleBox
+@export var panel_lo : StyleBox
+
+var bound_size : Vector2
+func _get_minimum_size() -> Vector2:
+	return bound_size
+
+func _draw() -> void:
+	bound_size = Vector2.ZERO
+	var col = -1
+	var row = -1
+	for n in range(bits.size()):
+		if group_size > 0 and n % group_size == 0:
+			col += 1
+			row = -1
+		else:
+			col = 0
+		row += 1
+		
+		
+		var text = labels[n]
+		text = text.replace(\"{n10}\", str(n))
+		text = text.replace(\"{n16}\", String.num_uint64(n, 16, true))
+		text = text.replace(\"{p2}\", str(floori(pow(2, n))))
+		var str_size = text_setts.font.get_string_size(text)
+		var spacing = text_setts.line_spacing
+		var x_offset = text_setts.paragraph_spacing
+		
+		
+		var rect = Rect2(
+			Vector2(str_size.x * col, (str_size.y + spacing) * row),
+			Vector2(str_size.x + x_offset + spacing, str_size.y)
+			)
+		if bits[n]:
+			draw_style_box(panel_hi, rect)
+		else:
+			draw_style_box(panel_lo, rect)
+		
+		draw_string(text_setts.font, rect.position + Vector2(x_offset, str_size.y - 3), text)
+		
+		bound_size.y += rect.end.y
+		reset_size()
+
+func _gui_input(event: InputEvent) -> void:
+	if editable and event is InputEventMouseButton and event.is_released():
+		var butt = floori(remap(event.position.y, 0, size.y, 0, bits.size()))
+		bits[butt] = not bits[butt]
+		queue_redraw()
+"
+
+[sub_resource type="SystemFont" id="SystemFont_3wwbt"]
+subpixel_positioning = 0
+
+[sub_resource type="LabelSettings" id="LabelSettings_8q3q4"]
+paragraph_spacing = 18.0
+font = SubResource("SystemFont_3wwbt")
+font_size = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3wwbt"]
+bg_color = Color(0.87703973, 0.1693233, 0.07909157, 1)
+border_width_left = 4
+border_width_top = 4
+border_color = Color(0.60531336, 0, 0.01932979, 1)
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_8q3q4"]
+bg_color = Color(0.55000913, 0.35341406, 0.34491688, 1)
+border_width_left = 4
+border_width_top = 4
+border_color = Color(0.31621063, 0.22732872, 0.21174225, 1)
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[node name="Bit_Indicator" type="Control"]
+custom_minimum_size = Vector2(0, 112)
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = SubResource("GDScript_h2yge")
+text_setts = SubResource("LabelSettings_8q3q4")
+panel_hi = SubResource("StyleBoxFlat_3wwbt")
+panel_lo = SubResource("StyleBoxFlat_8q3q4")

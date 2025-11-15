@@ -1,0 +1,392 @@
+[gd_scene load_steps=2 format=3 uid="uid://d0wqvrh5gq4eb"]
+
+[sub_resource type="GDScript" id="GDScript_1emcc"]
+script/source = "extends VBoxContainer
+
+signal data_selected(cells:PackedInt32Array)
+signal select_data_updated(cell:int, value:int)
+
+var content : PackedInt32Array
+var ports : Array[int]
+
+# Default port colors if settings file isn't helping.
+const PORT_COLOR = [Color(\"3F334D\"), Color(\"574B60\"), Color(\"337357\"), Color(\"6D9F71\"),
+	Color(\"61574C\"), Color(\"4D3E32\"), Color(\"7A6D97\"), Color(\"5F3269\")]
+
+var data_greatest : int
+var addr_greatest : int
+
+
+#region Make the Addresses into a scroller and disable the native ones.
+func _on_t_addr_draw() -> void:
+	%T_Addr.get_v_scroll_bar().hide()
+func _on_t_data_draw() -> void:
+	%T_Data.get_v_scroll_bar().hide()
+	%T_Data.get_h_scroll_bar().hide()
+
+var mouse_on_addrs : bool
+var dragging_addrs : bool
+var drag_start : float
+var scroll_start : float
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		match event.button_index:
+			MOUSE_BUTTON_WHEEL_DOWN:
+				%VScrollBar.value += 10
+			MOUSE_BUTTON_WHEEL_UP:
+				%VScrollBar.value -= 10
+
+
+func _on_drag_area_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion and dragging_addrs:
+		%VScrollBar.value = scroll_start + (drag_start - event.position.y)
+	if event is InputEventMouseButton:
+		match event.button_index:
+			MOUSE_BUTTON_LEFT:
+				dragging_addrs = event.is_pressed()
+				drag_start = event.position.y
+				scroll_start = %VScrollBar.value
+
+#endregion
+
+@onready var default_bg := Color.TRANSPARENT
+@onready var default_fg := Color.BLACK
+
+func _ready() -> void:
+	%T_Data.resized.connect(_on_tdata_resized)
+	%T_Addr/Drag_Area.gui_input.connect(_on_drag_area_gui_input)
+	%T_Addr.draw.connect(_on_t_addr_draw)
+	%T_Data.draw.connect(_on_t_data_draw)
+	%T_Data.multi_selected.connect(_on_t_data_multi_selected.unbind(1))
+	
+	%VScrollBar.share(%T_Addr.get_v_scroll_bar())
+	%VScrollBar.share(%T_Data.get_v_scroll_bar())
+	
+	randomize()
+	
+	var sett_colors = G.sett.get_value(\"Foobar\", \"port_color\")
+	var i : int = 0
+	for each : ColorPickerButton in %MAR.get_children():
+		each.color = sett_colors[i]
+		var picker = each.get_picker()
+		picker.color_changed.connect(_on_port_color_changed.bind(i))
+		picker.hex_visible = true
+		picker.presets_visible = false
+		picker.sampler_visible = false
+		picker.sliders_visible = true
+		picker.edit_alpha = false
+		picker.edit_intensity = false
+		
+		each.get_node(\"mar_val\").modulate = Color(sett_colors[i]).inverted()
+		each.custom_minimum_size.x = each.get_node(\"mar_val\").size.x + 12
+		i+=1
+
+
+var cell_wid : float
+var bouncing : bool
+func _on_tdata_resized():
+	# There's some sort of race condition or infinite loop when changing the ItemList size. A debouncing technique might help.
+	if bouncing:
+		return
+	bouncing = true
+	await get_tree().create_timer(0.3).timeout
+	bouncing = false
+	
+	%T_Data.max_columns = floori(%T_Data.size.x / cell_wid)
+	
+	%T_Addr.clear()
+	var addr_digits = D.digit_count(addr_greatest, 16)
+	
+	for n in range(0, addr_greatest + 1, %T_Data.max_columns):
+		%T_Addr.add_item(String.num_uint64(n, 16, true).lpad(addr_digits, \"0\"))
+	
+	%Addr_Label.custom_minimum_size.x = %T_Addr.size.x
+
+
+func _on_archie_changed():
+	data_greatest = D.greatest(G.CPU.data_wid)
+	addr_greatest = D.greatest(G.CPU.addr_wid)
+	content.resize(addr_greatest + 1)
+	for n in range(content.size()):
+		content[n] = randi_range(0, data_greatest)
+	update_shown_data()
+	
+	ports.resize(G.CPU.ram_port_count)
+	ports.fill(0)
+	var i : int = 0
+	for each in %MAR.get_children():
+		each.visible = i < G.CPU.ram_port_count
+		i += 1
+
+
+func update_shown_data():
+	data_greatest = D.greatest(G.CPU.data_wid)
+	var data_digits = D.digit_count(data_greatest, 16)
+	%T_Data.clear()
+	for n in range(content.size()):
+		%T_Data.add_item(String.num_uint64(content[n], 16, true).lpad(data_digits, \"0\"))
+		%T_Data.set_item_tooltip_enabled(n, false)
+	
+	await get_tree().process_frame
+	cell_wid = %T_Data.get_item_rect(0, false).size.x
+	_on_tdata_resized()
+	
+	update_cell_colors(ports, ports)
+
+
+var last_single_selected_cell : int = 0
+func deselect_all():
+	%T_Data.deselect_all()
+
+func get_selected_cells():
+	return %T_Data.get_selected_items()
+
+func _on_t_data_multi_selected(index:int):
+	if Input.is_key_pressed(KEY_CTRL):
+		var start = min(last_single_selected_cell, index)
+		var stop = max(last_single_selected_cell, index)
+		for n in range(start, stop):
+			if %T_Data.is_selected(n):
+				%T_Data.deselect(n)
+			else:
+				%T_Data.select(n, false)
+	else:
+		last_single_selected_cell = index
+		
+	data_selected.emit(%T_Data.get_selected_items())
+
+
+func _on_port_color_changed(color:Color, port:int=0):
+	var curr_color = G.sett.get_value(\"Foobar\", \"port_color\", PORT_COLOR)
+	curr_color[port] = color.to_html(false)
+	G.sett.set_value(\"Foobar\", \"port_color\", curr_color)
+	%MAR.get_child(port).get_node(\"mar_val\").modulate = color.inverted()
+	#set_addr(ports[port], port)
+	update_cell_colors(ports, ports)
+
+func update_cell_colors(old_state:Array[int], new_state:Array[int]):
+	for addr in old_state:  # Assume everything is to be cleared of color first.
+		%T_Data.set_item_custom_bg_color(addr, default_bg)
+		%T_Data.set_item_custom_fg_color(addr, default_fg)
+	var n : int = 0
+	for addr in new_state:  # Add colors as necessary.
+		var color_bg : Color = G.sett.get_value(\"Foobar\", \"port_color\")[n]
+		var color_fg := Color(color_bg.b, color_bg.r, color_bg.g).inverted()
+		%T_Data.set_item_custom_bg_color(addr, color_bg)
+		%T_Data.set_item_custom_fg_color(addr, color_fg)
+		n += 1
+
+func set_addr(addr:int, port:int=0) -> void:
+	var old_state = ports.duplicate()
+	addr = D.trim(addr, G.CPU.addr_wid)
+	ports[port] = addr
+	var addr_digits = D.digit_count(addr_greatest, 16)
+	%MAR.get_child(port).get_node(\"mar_val\").text = String.num_uint64(addr, 16, false).lpad(addr_digits, \"0\")
+	update_cell_colors(old_state, ports)
+
+func get_data(port:int = 0) -> int:
+	return content[ports[port]]
+
+func set_data(data:int, port:int=0):
+	data = D.trim(data, G.CPU.data_wid)
+	content[ports[port]] = data
+	%T_Data.set_item_text(ports[port],
+		String.num_uint64(data, 16, true) )
+	if ports[port] in %T_Data.get_selected_items():
+		select_data_updated.emit(ports[port], data)
+"
+
+[node name="Table" type="VBoxContainer" groups=["responds_archie"]]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_vertical = 3
+script = SubResource("GDScript_1emcc")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="T_Addr" type="ItemList" parent="HBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+focus_mode = 0
+auto_width = true
+item_count = 1
+item_0/text = "0000"
+
+[node name="Drag_Area" type="Control" parent="HBoxContainer/T_Addr"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="T_Data" type="ItemList" parent="HBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+select_mode = 2
+wraparound_items = false
+same_column_width = true
+
+[node name="VScrollBar" type="VScrollBar" parent="HBoxContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(12, 0)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="HBoxContainer2" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Addr_Label" type="Label" parent="HBoxContainer2"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(128, 0)
+layout_mode = 2
+text = "ADDR"
+
+[node name="MAR" type="HBoxContainer" parent="HBoxContainer2"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="port_0" type="ColorPickerButton" parent="HBoxContainer2/MAR"]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+
+[node name="mar_val" type="Label" parent="HBoxContainer2/MAR/port_0"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="port_1" type="ColorPickerButton" parent="HBoxContainer2/MAR"]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+
+[node name="mar_val" type="Label" parent="HBoxContainer2/MAR/port_1"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="port_2" type="ColorPickerButton" parent="HBoxContainer2/MAR"]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+
+[node name="mar_val" type="Label" parent="HBoxContainer2/MAR/port_2"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="port_3" type="ColorPickerButton" parent="HBoxContainer2/MAR"]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+
+[node name="mar_val" type="Label" parent="HBoxContainer2/MAR/port_3"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="port_4" type="ColorPickerButton" parent="HBoxContainer2/MAR"]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+
+[node name="mar_val" type="Label" parent="HBoxContainer2/MAR/port_4"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="port_5" type="ColorPickerButton" parent="HBoxContainer2/MAR"]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+
+[node name="mar_val" type="Label" parent="HBoxContainer2/MAR/port_5"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="port_6" type="ColorPickerButton" parent="HBoxContainer2/MAR"]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+
+[node name="mar_val" type="Label" parent="HBoxContainer2/MAR/port_6"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="port_7" type="ColorPickerButton" parent="HBoxContainer2/MAR"]
+custom_minimum_size = Vector2(32, 0)
+layout_mode = 2
+
+[node name="mar_val" type="Label" parent="HBoxContainer2/MAR/port_7"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "0"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Control" type="Control" parent="HBoxContainer2"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Format" type="OptionButton" parent="HBoxContainer2"]
+layout_mode = 2
+size_flags_horizontal = 8
+disabled = true
+selected = 0
+item_count = 2
+popup/item_0/text = "Hex"
+popup/item_0/id = 0
+popup/item_1/text = "ANSI"
+popup/item_1/id = 1

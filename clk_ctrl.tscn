@@ -1,0 +1,119 @@
+[gd_scene load_steps=2 format=3 uid="uid://ddmwo6h4l2cyx"]
+
+[sub_resource type="GDScript" id="GDScript_7msl6"]
+script/source = "extends VBoxContainer
+
+signal exec_mode_changed(is_auto:bool)
+signal rate_changed(rate:float)
+signal cycle_step_pressed()
+signal instr_step_pressed()
+
+const rates = [1, 2, 4, 6, 8, 10, 50,]
+const multiples = [1, 100, 10_000, 1_000_000]
+const suffixes = [\"Hz\", \"00Hz\", \"0KHz\", \"MHz\"]
+
+func _ready() -> void:
+	%Rate_Slider.max_value = rates.size() * (multiples.size() - 1) + 2  # The offsets from the sizes make the last multiple only have 3 rates
+	%Rate_Slider.value_changed.connect(_on_rate_slider_value_changed)
+	%Rate_Slider.value = G.sett.get_value(\"Foobar\", \"clk_rate_id\", 1)
+	%Clk_Mode.toggled.connect(_on_clk_mode_toggled)
+	_on_clk_mode_toggled(false)
+
+func _on_clk_mode_toggled(is_on:bool) -> void:
+	%Bttm_Manu.visible = not is_on
+	%Bttm_Auto.visible = is_on
+	%Clk_Mode.text = [\"Manual\", \"Automatic\"][int(is_on)]
+	exec_mode_changed.emit(is_on)
+	
+
+func _on_rate_slider_value_changed(val:float) -> void:
+	G.sett.set_value(\"Foobar\", \"clk_rate_id\", floori(val))
+	var maxim = rates.size() * multiples.size()  #NOTE: Don't use «%Rate_Slider.max_value» because that has purposeful offsets.
+	var rate = floori(val) % rates.size()
+	var mltpl = floori(remap(val, 0, maxim, 0, multiples.size()))
+	%Rate_Label.text = str(rates[rate]) + suffixes[mltpl]
+	var new_rate = rates[rate] * multiples[mltpl]
+	rate_changed.emit(new_rate)
+
+
+func _on_step_cycle_pressed() -> void:
+	cycle_step_pressed.emit()
+
+func _on_step_instr_pressed() -> void:
+	instr_step_pressed.emit()
+
+func _on_reset_pressed() -> void:
+	get_tree().call_group(\"responds_reset\", \"_on_exec_reset\")
+"
+
+[node name="Clk_Ctrl" type="VBoxContainer"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 93.0
+grow_horizontal = 2
+script = SubResource("GDScript_7msl6")
+
+[node name="Top" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="Top"]
+layout_mode = 2
+text = "Execution:"
+
+[node name="Spacer" type="Control" parent="Top"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Reset" type="Button" parent="Top"]
+layout_mode = 2
+text = "Reset
+"
+
+[node name="Clk_Mode" type="Button" parent="Top"]
+unique_name_in_owner = true
+layout_mode = 2
+toggle_mode = true
+text = "Manual"
+
+[node name="Bttm_Manu" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Label" type="Label" parent="Bttm_Manu"]
+layout_mode = 2
+text = "Step:"
+
+[node name="Spacer" type="Control" parent="Bttm_Manu"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Step_Cycle" type="Button" parent="Bttm_Manu"]
+layout_mode = 2
+text = "Cycle"
+
+[node name="Step_Instr" type="Button" parent="Bttm_Manu"]
+layout_mode = 2
+text = "Instr"
+
+[node name="Bttm_Auto" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Label" type="Label" parent="Bttm_Auto"]
+layout_mode = 2
+text = "Rate:"
+
+[node name="Rate_Slider" type="HSlider" parent="Bttm_Auto"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+
+[node name="Rate_Label" type="Label" parent="Bttm_Auto"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "2Hz"
+
+[connection signal="pressed" from="Top/Reset" to="." method="_on_reset_pressed"]
+[connection signal="pressed" from="Bttm_Manu/Step_Cycle" to="." method="_on_step_cycle_pressed"]
+[connection signal="pressed" from="Bttm_Manu/Step_Instr" to="." method="_on_step_instr_pressed"]
